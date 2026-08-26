@@ -19,6 +19,7 @@ import {
   annoBounds,
   moveAnnotation,
   resizeAnnotation,
+  uid,
 } from "@/lib/annotations";
 
 const HANDLES = ["nw", "ne", "sw", "se"] as const;
@@ -216,14 +217,17 @@ function AnnotationLayer(props: LayerProps) {
     }
 
     if (tool === "text") {
-      const id = crypto.randomUUID();
+      // Prevent the browser's default mousedown focus-shift, which would
+      // immediately blur (and thereby delete) the freshly created text box.
+      e.preventDefault();
+      const id = uid();
       const a: TextAnnotation = {
         id,
         pageIndex: props.info.index,
         type: "text",
         x: pt.x,
         y: pt.y - 8,
-        width: Math.min(220, props.info.width - pt.x - 8),
+        width: Math.max(40, Math.min(220, props.info.width - pt.x - 8)),
         height: props.textStyle.fontSize * 1.35,
         text: "",
         color: props.textStyle.color,
@@ -294,7 +298,7 @@ function AnnotationLayer(props: LayerProps) {
       setDrawPreview(null);
       if (drawPreview.length >= 2 && d.moved) {
         const a: DrawAnnotation = {
-          id: crypto.randomUUID(),
+          id: uid(),
           pageIndex: props.info.index,
           type: "draw",
           points: drawPreview,
@@ -320,7 +324,7 @@ function AnnotationLayer(props: LayerProps) {
       const kind = kindMap[props.tool];
       if (kind) {
         const a: ShapeAnnotation = {
-          id: crypto.randomUUID(),
+          id: uid(),
           pageIndex: props.info.index,
           type: kind,
           ...shapePreview,
@@ -684,16 +688,22 @@ function TextItem({
 
   useEffect(() => {
     if (!editing) return;
-    const el = editRef.current;
-    if (!el) return;
-    el.innerText = a.text;
-    el.focus();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    sel?.addRange(range);
+    // Defer focus to the next frame so the browser finishes the default
+    // mousedown handling (focus-shift) first — otherwise the box would be
+    // blurred instantly and removed as empty.
+    const raf = requestAnimationFrame(() => {
+      const el = editRef.current;
+      if (!el) return;
+      el.innerText = a.text;
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+    return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
@@ -721,6 +731,7 @@ function TextItem({
   if (editing) {
     return (
       <div
+        key="edit"
         ref={editRef}
         contentEditable
         suppressContentEditableWarning
@@ -742,6 +753,7 @@ function TextItem({
 
   return (
     <div
+      key="view"
       className="absolute"
       style={{
         ...base,

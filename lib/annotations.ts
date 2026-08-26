@@ -9,6 +9,13 @@ export type ToolId =
   | "ellipse"
   | "line";
 
+/** crypto.randomUUID is unavailable in insecure contexts (plain LAN IP). */
+export function uid(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export type FontFamilyId = "helvetica" | "times" | "courier";
 
 export interface Point {

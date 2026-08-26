@@ -38,6 +38,7 @@ import type {
   TextAnnotation,
   ToolId,
 } from "@/lib/annotations";
+import { uid } from "@/lib/annotations";
 import { exportEditedPdf } from "@/lib/pdfExport";
 import { takePendingFile } from "@/lib/fileStore";
 import { PageView } from "./PageView";
@@ -208,7 +209,7 @@ export function EditClient() {
     const a = annosRef.current.find((x) => x.id === selectedId);
     if (!a) return;
     const copy = structuredClone(a);
-    copy.id = crypto.randomUUID();
+    copy.id = uid();
     if (copy.type !== "draw") {
       copy.x += 16;
       copy.y += 16;
@@ -324,7 +325,7 @@ export function EditClient() {
       const maxW = Math.min(pageInfo.width * 0.45, 320);
       const w = maxW;
       const h = (size.h / size.w) * w;
-      const id = crypto.randomUUID();
+      const id = uid();
       addAnnotation({
         id,
         pageIndex: pageInfo.index,
@@ -707,7 +708,10 @@ export function EditClient() {
                     setSelectedId(null);
                     return;
                   }
-                  updateAnnotation({ ...a, text, height: Math.max(heightPt, a.fontSize * 1.35) }, null);
+                  updateAnnotation(
+                    { ...a, text, height: Math.max(heightPt, a.fontSize * 1.35) },
+                    annosRef.current,
+                  );
                 }}
                 onCreate={(a) => addAnnotation(a)}
                 onUpdateLive={(a) => updateAnnotation(a, null)}

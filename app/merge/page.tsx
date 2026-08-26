@@ -7,6 +7,7 @@ import { ResultCard } from "@/components/ResultCard";
 import { ToolHeader } from "@/components/ToolHeader";
 import { PDFDocument } from "pdf-lib";
 import { takePendingFiles } from "@/lib/fileStore";
+import { uid } from "@/lib/annotations";
 import { useEffect } from "react";
 
 interface Item {
@@ -28,7 +29,7 @@ export default function MergePage() {
     const t = setTimeout(() => {
       const pending = takePendingFiles();
       if (pending && pending.length > 0) {
-        setItems(pending.map((file) => ({ id: crypto.randomUUID(), file })));
+        setItems(pending.map((file) => ({ id: uid(), file })));
       }
     }, 0);
     return () => clearTimeout(t);
@@ -40,7 +41,7 @@ export default function MergePage() {
     );
     setItems((prev) => [
       ...prev,
-      ...pdfs.map((file) => ({ id: crypto.randomUUID(), file })),
+      ...pdfs.map((file) => ({ id: uid(), file })),
     ]);
     setResult(null);
   }, []);
