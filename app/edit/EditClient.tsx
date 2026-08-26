@@ -134,9 +134,12 @@ export function EditClient() {
   }, []);
 
   useEffect(() => {
-    const pending = takePendingFile();
-    if (!pending) return;
-    const t = setTimeout(() => void loadFile(pending), 0);
+    // Consume the pending file inside the deferred callback so Strict Mode's
+    // double effect-run + cleanup cycle can't swallow it.
+    const t = setTimeout(() => {
+      const pending = takePendingFile();
+      if (pending) void loadFile(pending);
+    }, 0);
     return () => clearTimeout(t);
   }, [loadFile]);
 
