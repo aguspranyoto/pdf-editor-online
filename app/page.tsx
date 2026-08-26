@@ -1,69 +1,165 @@
-import Image from "next/image";
+import Link from "next/link";
+import {
+  Combine,
+  Scissors,
+  LayoutGrid,
+  ShieldCheck,
+  Zap,
+  Infinity as InfinityIcon,
+  PenLine,
+} from "lucide-react";
+import { Logo } from "@/components/Logo";
+import { HeroDropzone } from "@/components/HeroDropzone";
+
+const tools = [
+  {
+    href: "/edit",
+    name: "Edit PDF",
+    desc: "Add text, shapes, drawings and images to any PDF.",
+    icon: PenLine,
+    highlight: true,
+  },
+  {
+    href: "/merge",
+    name: "Merge PDF",
+    desc: "Combine multiple PDFs into a single document.",
+    icon: Combine,
+    highlight: false,
+  },
+  {
+    href: "/split",
+    name: "Split PDF",
+    desc: "Extract specific pages into a separate file.",
+    icon: Scissors,
+    highlight: false,
+  },
+  {
+    href: "/organize",
+    name: "Organize PDF",
+    desc: "Visually reorder, rotate and delete pages.",
+    icon: LayoutGrid,
+    highlight: false,
+  },
+];
+
+const perks = [
+  {
+    icon: ShieldCheck,
+    title: "100% private",
+    desc: "Everything runs in your browser. Your files never touch a server.",
+  },
+  {
+    icon: Zap,
+    title: "Instant",
+    desc: "No uploads, no queues. Edits apply in real time.",
+  },
+  {
+    icon: InfinityIcon,
+    title: "Free & unlimited",
+    desc: "No accounts, no watermarks, no daily limits.",
+  },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex min-h-screen flex-col bg-slate-50">
+      <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+          <Logo />
+          <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
+            {tools.slice(0, 3).map((t) => (
+              <Link key={t.href} href={t.href} className="hover:text-brand-600">
+                {t.name}
+              </Link>
+            ))}
+          </nav>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+      </header>
+
+      <main className="flex-1">
+        {/* Hero */}
+        <section className="relative overflow-hidden">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 -top-40 mx-auto h-96 max-w-4xl rounded-full bg-brand-200/40 blur-3xl"
+          />
+          <div className="relative mx-auto max-w-3xl px-4 py-20 text-center sm:py-24">
+            <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
+              Every PDF tool you need.
+              <span className="block text-brand-600">Right in your browser.</span>
+            </h1>
+            <p className="mx-auto mt-5 max-w-xl text-lg text-slate-600">
+              Edit, merge, split and organize PDF files in seconds — free,
+              private, and without uploading anything to a server.
+            </p>
+            <div className="mt-10">
+              <HeroDropzone />
+            </div>
+            <p className="mt-4 text-sm text-slate-400">
+              By using this tool you agree that files are processed locally on
+              your device.
+            </p>
+          </div>
+        </section>
+
+        {/* Tools grid */}
+        <section className="mx-auto max-w-6xl px-4 pb-8">
+          <h2 className="mb-8 text-center text-2xl font-bold text-slate-900">
+            All the tools, one place
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {tools.map((tool) => (
+              <Link
+                key={tool.href}
+                href={tool.href}
+                className={`group flex flex-col rounded-2xl border p-6 transition hover:-translate-y-0.5 hover:shadow-lg ${
+                  tool.highlight
+                    ? "border-brand-200 bg-white shadow-sm ring-2 ring-brand-500/60"
+                    : "border-slate-200 bg-white shadow-sm"
+                }`}
+              >
+                <span
+                  className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl transition group-hover:scale-110 ${
+                    tool.highlight
+                      ? "bg-brand-600 text-white"
+                      : "bg-brand-50 text-brand-600"
+                  }`}
+                >
+                  <tool.icon className="h-6 w-6" />
+                </span>
+                <span className="font-semibold text-slate-900">
+                  {tool.name}
+                </span>
+                <span className="mt-1 text-sm leading-relaxed text-slate-500">
+                  {tool.desc}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        {/* Perks */}
+        <section className="mx-auto max-w-6xl px-4 py-16">
+          <div className="grid gap-10 sm:grid-cols-3">
+            {perks.map((p) => (
+              <div key={p.title} className="flex flex-col items-center text-center">
+                <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-900 text-white">
+                  <p.icon className="h-6 w-6" />
+                </span>
+                <h3 className="font-semibold text-slate-900">{p.title}</h3>
+                <p className="mt-1 max-w-xs text-sm text-slate-500">{p.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </main>
+
+      <footer className="border-t border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-sm text-slate-500 sm:flex-row">
+          <Logo />
+          <p>© {new Date().getFullYear()} PDF Pilot. Files stay on your device.</p>
+        </div>
+      </footer>
     </div>
   );
 }
