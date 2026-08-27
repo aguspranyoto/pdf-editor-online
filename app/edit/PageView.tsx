@@ -167,6 +167,7 @@ function AnnotationLayer(props: LayerProps) {
   } | null>(null);
 
   const [drawPreview, setDrawPreview] = useState<Point[] | null>(null);
+  const drawPreviewRef = useRef<Point[] | null>(null);
   const [shapePreview, setShapePreview] = useState<
     { x: number; y: number; width: number; height: number } | null
   >(null);
@@ -212,6 +213,7 @@ function AnnotationLayer(props: LayerProps) {
         preSnapshot: pre,
         moved: false,
       };
+      drawPreviewRef.current = [pt];
       setDrawPreview([pt]);
       return;
     }
@@ -259,10 +261,12 @@ function AnnotationLayer(props: LayerProps) {
     const dx = pt.x - d.startPt.x;
     const dy = pt.y - d.startPt.y;
 
-    if (d.mode === "draw" && drawPreview) {
-      const last = drawPreview[drawPreview.length - 1];
+    if (d.mode === "draw" && drawPreviewRef.current) {
+      const last = drawPreviewRef.current[drawPreviewRef.current.length - 1];
       if (Math.hypot(pt.x - last.x, pt.y - last.y) > 1.5) {
-        setDrawPreview([...drawPreview, pt]);
+        const next = [...drawPreviewRef.current, pt];
+        drawPreviewRef.current = next;
+        setDrawPreview(next);
       }
       d.moved = true;
       return;
@@ -303,14 +307,16 @@ function AnnotationLayer(props: LayerProps) {
     dragRef.current = null;
     if (!d) return;
 
-    if (d.mode === "draw" && drawPreview) {
+    if (d.mode === "draw" && drawPreviewRef.current) {
+      const points = drawPreviewRef.current;
+      drawPreviewRef.current = null;
       setDrawPreview(null);
-      if (drawPreview.length >= 2 && d.moved) {
+      if (points.length >= 2 && d.moved) {
         const a: DrawAnnotation = {
           id: uid(),
           pageIndex: props.info.index,
           type: "draw",
-          points: drawPreview,
+          points,
           color: props.color,
           strokeWidth: props.strokeWidth,
         };
