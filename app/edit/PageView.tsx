@@ -270,12 +270,21 @@ function AnnotationLayer(props: LayerProps) {
     if (d.mode === "create") {
       if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
       if (tool !== "select") {
-        setShapePreview({
-          x: Math.min(d.startPt.x, pt.x),
-          y: Math.min(d.startPt.y, pt.y),
-          width: Math.abs(dx),
-          height: Math.abs(dy),
-        });
+        if (tool === "line") {
+          setShapePreview({
+            x: d.startPt.x,
+            y: d.startPt.y,
+            width: dx,
+            height: dy,
+          });
+        } else {
+          setShapePreview({
+            x: Math.min(d.startPt.x, pt.x),
+            y: Math.min(d.startPt.y, pt.y),
+            width: Math.abs(dx),
+            height: Math.abs(dy),
+          });
+        }
       }
       return;
     }
@@ -415,7 +424,26 @@ function AnnotationLayer(props: LayerProps) {
       ))}
 
       {/* previews */}
-      {shapePreview && shapePreview.width > 0 && shapePreview.height > 0 && (
+      {shapePreview && tool === "line" && (shapePreview.width !== 0 || shapePreview.height !== 0) && (
+        <svg
+          className="pointer-events-none absolute inset-0"
+          width={cssW}
+          height={cssH}
+          viewBox={`0 0 ${cssW} ${cssH}`}
+        >
+          <line
+            x1={shapePreview.x * s}
+            y1={shapePreview.y * s}
+            x2={(shapePreview.x + shapePreview.width) * s}
+            y2={(shapePreview.y + shapePreview.height) * s}
+            stroke={props.color}
+            strokeWidth={props.strokeWidth * s}
+            strokeDasharray="6 3"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+      {shapePreview && shapePreview.width > 0 && shapePreview.height > 0 && tool !== "line" && (
         <div
           className="pointer-events-none absolute border border-dashed border-brand-500/80 bg-brand-500/10"
           style={{
@@ -592,13 +620,17 @@ function AnnotationItem({
       />
     );
   } else {
+    const localX1 = (a.x - b.x) * s;
+    const localY1 = (a.y - b.y) * s;
+    const localX2 = (a.x + a.width - b.x) * s;
+    const localY2 = (a.y + a.height - b.y) * s;
     inner = (
       <svg className="absolute inset-0 h-full w-full overflow-visible">
         <line
-          x1={0}
-          y1={0}
-          x2={b.width * s}
-          y2={b.height * s}
+          x1={localX1}
+          y1={localY1}
+          x2={localX2}
+          y2={localY2}
           stroke={a.color}
           strokeWidth={a.strokeWidth * s}
           strokeLinecap="round"

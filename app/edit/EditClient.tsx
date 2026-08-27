@@ -67,6 +67,7 @@ export function EditClient() {
   const [error, setError] = useState<string | null>(null);
   const [fileName, setFileName] = useState("document.pdf");
   const bytesRef = useRef<Uint8Array | null>(null);
+  const docRef = useRef<Awaited<ReturnType<typeof openDocument>> | null>(null);
   const [doc, setDoc] = useState<Awaited<ReturnType<typeof openDocument>> | null>(
     null,
   );
@@ -101,9 +102,14 @@ export function EditClient() {
     setStatus("loading");
     setError(null);
     try {
+      if (docRef.current) {
+        docRef.current.destroy().catch(() => {});
+        docRef.current = null;
+      }
       const buf = await file.arrayBuffer();
       bytesRef.current = new Uint8Array(buf);
       const d = await openDocument(buf);
+      docRef.current = d;
       const infos: PageInfo[] = [];
       for (let i = 0; i < d.numPages; i++) {
         const page = await d.getPage(i + 1);
@@ -159,26 +165,22 @@ export function EditClient() {
   }, []);
 
   const undo = useCallback(() => {
-    setPast((p) => {
-      if (p.length === 0) return p;
-      const prev = p[p.length - 1];
-      setFuture((f) => [annosRef.current, ...f.slice(0, 49)]);
-      annosRef.current = prev;
-      setAnnosState(prev);
-      return p.slice(0, -1);
-    });
-  }, []);
+    if (past.length === 0) return;
+    const prev = past[past.length - 1];
+    setPast(past.slice(0, -1));
+    setFuture((f) => [annosRef.current, ...f.slice(0, 49)]);
+    annosRef.current = prev;
+    setAnnosState(prev);
+  }, [past]);
 
   const redo = useCallback(() => {
-    setFuture((f) => {
-      if (f.length === 0) return f;
-      const next = f[0];
-      setPast((p) => [...p.slice(-49), annosRef.current]);
-      annosRef.current = next;
-      setAnnosState(next);
-      return f.slice(1);
-    });
-  }, []);
+    if (future.length === 0) return;
+    const next = future[0];
+    setFuture(future.slice(1));
+    setPast((p) => [...p.slice(-49), annosRef.current]);
+    annosRef.current = next;
+    setAnnosState(next);
+  }, [future]);
 
   const addAnnotation = useCallback(
     (a: Annotation) => {
@@ -703,8 +705,9 @@ export function EditClient() {
                   );
                   if (!a) return;
                   if (!text.trim()) {
-                    commitHistory(annosRef.current);
+                    const pre = annosRef.current;
                     applyAnnos(annosRef.current.filter((x) => x.id !== id));
+                    commitHistory(pre);
                     setSelectedId(null);
                     return;
                   }

@@ -95,6 +95,19 @@ export function annoBounds(a: Annotation): {
       height: Math.max(...ys) + a.strokeWidth - minY,
     };
   }
+  if (a.type === "line") {
+    const x1 = a.x;
+    const y1 = a.y;
+    const x2 = a.x + a.width;
+    const y2 = a.y + a.height;
+    const pad = a.strokeWidth;
+    return {
+      x: Math.min(x1, x2) - pad,
+      y: Math.min(y1, y2) - pad,
+      width: Math.abs(x2 - x1) + 2 * pad,
+      height: Math.abs(y2 - y1) + 2 * pad,
+    };
+  }
   if (a.type === "text") return { x: a.x, y: a.y, width: a.width, height: a.height };
   return { x: a.x, y: a.y, width: a.width, height: a.height };
 }
@@ -133,7 +146,20 @@ export function resizeAnnotation(
 
   switch (a.type) {
     case "text":
-      return { ...a, x: nx, y: ny, width: nw };
+      return { ...a, x: nx, y: ny, width: nw, height: nh };
+    case "line": {
+      const ob = annoBounds(a);
+      if (ob.width === 0 || ob.height === 0) {
+        return { ...a, x: nx, y: ny, width: nw, height: nh };
+      }
+      const sx = nw / ob.width;
+      const sy = nh / ob.height;
+      const x1 = nx + (a.x - ob.x) * sx;
+      const y1 = ny + (a.y - ob.y) * sy;
+      const x2 = nx + (a.x + a.width - ob.x) * sx;
+      const y2 = ny + (a.y + a.height - ob.y) * sy;
+      return { ...a, x: x1, y: y1, width: x2 - x1, height: y2 - y1 };
+    }
     case "draw": {
       const sx = nw / b.width || 1;
       const sy = nh / b.height || 1;

@@ -158,6 +158,14 @@ export async function exportEditedPdf(
           width: a.width,
           height: a.height,
         });
+      } else if (a.type === "line") {
+        const { r, g, b } = hexToRgb(a.color);
+        page.drawLine({
+          start: { x: a.x, y: yFromBottom(a.y) },
+          end: { x: a.x + a.width, y: yFromBottom(a.y + a.height) },
+          thickness: a.strokeWidth,
+          color: rgb(r, g, b),
+        });
       } else {
         const { r, g, b } = hexToRgb(a.color);
         const color = rgb(r, g, b);
@@ -193,13 +201,6 @@ export async function exportEditedPdf(
             yScale: h / 2,
             borderColor: color,
             borderWidth: a.strokeWidth,
-          });
-        } else if (a.type === "line") {
-          page.drawLine({
-            start: { x, y: top },
-            end: { x: x + w, y: top - h },
-            thickness: a.strokeWidth,
-            color,
           });
         }
       }
