@@ -872,16 +872,48 @@ function multMatrix(a: readonly number[], b: readonly number[]): number[] {
   ];
 }
 
-/** Guess bold/italic/family from a PDF font name (e.g. "ABCDEE+Calibri-Bold"). */
-function detectFontStyle(fontName: string): PdfTextStyle {
-  const n = (fontName || "").toLowerCase();
-  const bold = /bold|black|heavy|demi|semibold|extrabold/.test(n);
-  const italic = /italic|oblique/.test(n);
-  const fontFamily: FontFamilyId = /courier|monospace|consola|fixedsys/.test(n)
-    ? "courier"
-    : /times|georgia|garamond|palatino|bookman|charter/.test(n)
-      ? "times"
-      : "helvetica";
+interface PdfFontObject {
+  name?: string;
+  psName?: string;
+  bold?: boolean;
+  black?: boolean;
+  italic?: boolean;
+  fallbackName?: string;
+  systemFontInfo?: {
+    baseFontName?: string;
+    style?: { weight?: string; style?: string };
+  };
+}
+
+/** Resolve bold/italic/family from a loaded PDF font object.
+ * getTextContent only gives an internal id (e.g. "g_d0_f2"), so the real
+ * name/flags must come from page.commonObjs (populated via getOperatorList).
+ * Covers embedded subset names ("ABCDEE+Calibri-Bold") and system-font
+ * substitution info (Helvetica-Bold, Arial-BoldMT, TimesNewRoman-Italic). */
+function styleFromFontObject(fontObj: PdfFontObject | undefined, fallbackFamily?: string): PdfTextStyle {
+  const raw = [fontObj?.name, fontObj?.psName, fontObj?.systemFontInfo?.baseFontName]
+    .filter(Boolean)
+    .join(" ");
+  const n = raw.toLowerCase();
+  const weight = fontObj?.systemFontInfo?.style?.weight;
+  const slant = fontObj?.systemFontInfo?.style?.style;
+  const bold =
+    !!fontObj?.bold ||
+    !!fontObj?.black ||
+    /bold|black|heavy|demi|semibold|extrabold/.test(n) ||
+    weight === "bold" ||
+    (typeof weight === "string" && parseInt(weight, 10) >= 700);
+  const italic =
+    !!fontObj?.italic || /italic|oblique/.test(n) || slant === "italic";
+  let fontFamily: FontFamilyId = "helvetica";
+  if (/courier|monospace|consola|fixedsys/.test(n)) fontFamily = "courier";
+  else if (/times|georgia|garamond|palatino|bookman|charter/.test(n))
+    fontFamily = "times";
+  else {
+    const fb = `${fontObj?.fallbackName || ""} ${fallbackFamily || ""}`.toLowerCase();
+    if (fb.includes("mono")) fontFamily = "courier";
+    else if (fb.includes("serif") && !fb.includes("sans")) fontFamily = "times";
+  }
   return { fontFamily, bold, italic };
 }
 
@@ -929,6 +961,24 @@ function PdfTextLayer({
         const vp = page.getViewport({ scale: 1 });
         const tc = await page.getTextContent();
         if (cancelled) return;
+        // getTextContent only yields internal font ids (e.g. "g_d0_f2"), so
+        // resolve real names/flags via the operator list's loaded font objects.
+        const fontObjs = new Map<string, PdfFontObject>();
+        try {
+          const ops = await page.getOperatorList();
+          const OPS_SET_FONT = 37; // pdf.js OPS.setFont
+          const ids = new Set<string>();
+          for (let i = 0; i < ops.fnArray.length; i++) {
+            if (ops.fnArray[i] === OPS_SET_FONT && typeof ops.argsArray[i]?.[0] === "string") {
+              ids.add(ops.argsArray[i][0]);
+            }
+          }
+          for (const id of ids) {
+            try {
+              if (page.commonObjs.has(id)) fontObjs.set(id, page.commonObjs.get(id));
+            } catch { /* not resolved yet */ }
+          }
+        } catch { /* fall back to name guessing */ }
         const raws: {
           x: number;
           top: number;
@@ -957,8 +1007,10 @@ function PdfTextLayer({
               : raw.str.length * fs * 0.5;
           const x = tx[4];
           const top = tx[5] - fs;
-          const style = detectFontStyle(
-            "fontName" in raw ? (raw.fontName ?? "") : "",
+          const fontId = "fontName" in raw ? (raw.fontName ?? "") : "";
+          const style = styleFromFontObject(
+            fontObjs.get(fontId),
+            tc.styles?.[fontId]?.fontFamily,
           );
           raws.push({
             x,
