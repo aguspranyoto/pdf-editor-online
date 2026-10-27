@@ -279,6 +279,7 @@ export function EditClient() {
       applyAnnos([...pre, whiteout, replacement]);
       commitHistory(pre);
       setSelectedId(replacement.id);
+      setTool("select");
     },
     [applyAnnos, commitHistory],
   );
