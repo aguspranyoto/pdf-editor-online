@@ -6,8 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
-import { loadPdfjs } from "@/lib/pdfjs";
+import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import type {
   Annotation,
   DrawAnnotation,
@@ -56,6 +55,7 @@ interface PageViewProps {
     box: { x: number; y: number; width: number; height: number },
     text: string,
     fontSize: number,
+    style: { fontFamily: FontFamilyId; bold: boolean; italic: boolean },
   ) => void;
   onUpdateLive: (a: Annotation) => void;
   onBeginInteraction: () => Annotation[] | null;
@@ -143,13 +143,13 @@ export function PageView(props: PageViewProps) {
       )}
       <AnnotationLayer {...props} cssW={cssW} cssH={cssH} overlayRef={overlayRef} />
       <PdfTextLayer
-        key={`pdftext-${info.index}-${displayScale}`}
         doc={doc}
         pageIndex={info.index}
         displayScale={displayScale}
         cssW={cssW}
         cssH={cssH}
         active={props.tool === "editText"}
+        visible={visible}
         onReplace={props.onReplacePdfText}
       />
     </div>
@@ -841,13 +841,48 @@ function TextItem({
   );
 }
 
-/* ================= Native PDF text layer (edit existing text) ================= */
+/* ================= Native PDF text (edit existing text) ================= */
 
-interface PdfTextBox {
-  left: number;
-  top: number;
+interface PdfTextStyle {
+  fontFamily: FontFamilyId;
+  bold: boolean;
+  italic: boolean;
+}
+
+interface PdfLine extends PdfTextStyle {
+  id: number;
+  /** Box in PDF points (top-left origin). */
+  x: number;
+  y: number;
   width: number;
   height: number;
+  fontSize: number;
+  text: string;
+}
+
+/** Multiply two 2D affine matrices in pdf.js [a,b,c,d,e,f] form. */
+function multMatrix(a: readonly number[], b: readonly number[]): number[] {
+  return [
+    a[0] * b[0] + a[2] * b[1],
+    a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3],
+    a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4],
+    a[1] * b[4] + a[3] * b[5] + a[5],
+  ];
+}
+
+/** Guess bold/italic/family from a PDF font name (e.g. "ABCDEE+Calibri-Bold"). */
+function detectFontStyle(fontName: string): PdfTextStyle {
+  const n = (fontName || "").toLowerCase();
+  const bold = /bold|black|heavy|demi|semibold|extrabold/.test(n);
+  const italic = /italic|oblique/.test(n);
+  const fontFamily: FontFamilyId = /courier|monospace|consola|fixedsys/.test(n)
+    ? "courier"
+    : /times|georgia|garamond|palatino|bookman|charter/.test(n)
+      ? "times"
+      : "helvetica";
+  return { fontFamily, bold, italic };
 }
 
 function PdfTextLayer({
@@ -857,6 +892,7 @@ function PdfTextLayer({
   cssW,
   cssH,
   active,
+  visible,
   onReplace,
 }: {
   doc: PDFDocumentProxy;
@@ -865,65 +901,183 @@ function PdfTextLayer({
   cssW: number;
   cssH: number;
   active: boolean;
+  visible: boolean;
   onReplace: (
     pageIndex: number,
     box: { x: number; y: number; width: number; height: number },
     text: string,
     fontSize: number,
+    style: PdfTextStyle,
   ) => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const layerRef = useRef<{ textDivs?: HTMLElement[] } | null>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
-  const [hasText, setHasText] = useState<boolean | null>(null);
+  const [lines, setLines] = useState<PdfLine[] | null>(null);
   const [draft, setDraft] = useState<
-    (PdfTextBox & { fontSize: number; original: string; value: string }) | null
+    (PdfLine & { original: string; value: string }) | null
   >(null);
 
+  // Extract native text boxes once the page is on screen. Boxes are computed
+  // in PDF points, so zoom changes need no refetch.
   useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
-    let layer: { cancel?: () => void; render: () => Promise<unknown> } | null =
-      null;
-    // NOTE: hasText/draft reset on zoom via key-remount from the parent,
-    // so no synchronous setState here (react-hooks/set-state-in-effect).
     (async () => {
-      let page: {
-        getViewport: (o: { scale: number }) => { width: number; height: number };
-        getTextContent: () => Promise<unknown>;
-        cleanup?: () => void;
-      } | null = null;
+      let page: PDFPageProxy | null = null;
       try {
-        const pdfjs = await loadPdfjs();
         page = await doc.getPage(pageIndex + 1);
         if (cancelled) return;
-        const viewport = page.getViewport({ scale: displayScale });
-        const textContent = await page.getTextContent();
+        const vp = page.getViewport({ scale: 1 });
+        const tc = await page.getTextContent();
         if (cancelled) return;
-        const container = containerRef.current;
-        if (!container) return;
-        container.innerHTML = "";
-        const Ctor = (pdfjs as unknown as { TextLayer?: new (o: object) => { cancel?: () => void; render: () => Promise<unknown> } }).TextLayer;
-        if (!Ctor) {
-          setHasText(false);
-          return;
+        const raws: {
+          x: number;
+          top: number;
+          right: number;
+          bottom: number;
+          fs: number;
+          text: string;
+          style: PdfTextStyle;
+        }[] = [];
+        for (const raw of tc.items) {
+          if (!("str" in raw) || !raw.str) continue;
+          const tx = multMatrix(vp.transform, raw.transform);
+          const angle = Math.atan2(tx[1], tx[0]);
+          // Skip vertical / rotated text (rare); we only edit horizontal lines.
+          if (
+            Math.abs(angle) > 0.08 &&
+            Math.abs(Math.abs(angle) - Math.PI) > 0.08
+          )
+            continue;
+          const fs = Math.hypot(tx[2], tx[3]);
+          if (!(fs > 0.5)) continue;
+          const w =
+            typeof raw.width === "number" && raw.width > 0
+              ? raw.width
+              : raw.str.length * fs * 0.5;
+          const x = tx[4];
+          const top = tx[5] - fs;
+          const style = detectFontStyle(
+            "fontName" in raw ? (raw.fontName ?? "") : "",
+          );
+          raws.push({
+            x,
+            top,
+            right: x + w,
+            bottom: top + fs,
+            fs,
+            text: raw.str,
+            style,
+          });
         }
-        layer = new Ctor({
-          textContentSource: textContent,
-          container,
-          viewport,
-        });
-        layerRef.current = layer as unknown as { textDivs?: HTMLElement[] };
-        await layer.render();
-        if (cancelled) return;
-        const divs: HTMLElement[] =
-          (layerRef.current?.textDivs as HTMLElement[] | undefined) ??
-          Array.from(container.querySelectorAll("span"));
-        setHasText(divs.some((d) => (d.textContent ?? "").trim().length > 0));
+        raws.sort((a, b) => a.top - b.top || a.x - b.x);
+        const accs: {
+          top: number;
+          bottom: number;
+          fs: number;
+          parts: {
+            x: number;
+            right: number;
+            text: string;
+            style: PdfTextStyle;
+          }[];
+        }[] = [];
+        for (const r of raws) {
+          const tol = Math.max(2, r.fs * 0.3);
+          const acc = accs.find((a) => Math.abs(a.top - r.top) <= tol);
+          if (acc) {
+            acc.top = Math.min(acc.top, r.top);
+            acc.bottom = Math.max(acc.bottom, r.bottom);
+            acc.fs = Math.max(acc.fs, r.fs);
+            acc.parts.push({ x: r.x, right: r.right, text: r.text, style: r.style });
+          } else {
+            accs.push({
+              top: r.top,
+              bottom: r.bottom,
+              fs: r.fs,
+              parts: [{ x: r.x, right: r.right, text: r.text, style: r.style }],
+            });
+          }
+        }
+        const built: PdfLine[] = [];
+        let nextId = 0;
+        for (const acc of accs) {
+          acc.parts.sort((a, b) => a.x - b.x);
+          // Split one visual row into separate segments when there is a big
+          // horizontal gap (e.g. two columns / separate boxes in one row),
+          // so editing one segment doesn't swallow its neighbor.
+          const clusters: (typeof acc.parts)[] = [];
+          let cursor = -Infinity;
+          for (const p of acc.parts) {
+            const last = clusters[clusters.length - 1];
+            if (
+              last &&
+              last.length > 0 &&
+              p.x - cursor > acc.fs * 1.0
+            ) {
+              clusters.push([]);
+            }
+            if (clusters.length === 0) clusters.push([]);
+            clusters[clusters.length - 1].push(p);
+            cursor = Math.max(cursor, p.right);
+          }
+          for (const parts of clusters) {
+            let text = "";
+            let cur = -Infinity;
+            for (const p of parts) {
+              if (
+                text &&
+                p.x - cur > acc.fs * 0.2 &&
+                !text.endsWith(" ") &&
+                !p.text.startsWith(" ")
+              )
+                text += " ";
+              text += p.text;
+              cur = Math.max(cur, p.right);
+            }
+            if (!text.trim()) continue;
+            const x = Math.min(...parts.map((p) => p.x));
+            const right = Math.max(...parts.map((p) => p.right));
+            if (right - x < 1) continue;
+            // Dominant style by character count.
+            let total = 0;
+            let boldChars = 0;
+            let italicChars = 0;
+            const famCount: Record<FontFamilyId, number> = {
+              helvetica: 0,
+              times: 0,
+              courier: 0,
+            };
+            for (const p of parts) {
+              const len = p.text.length;
+              total += len;
+              if (p.style.bold) boldChars += len;
+              if (p.style.italic) italicChars += len;
+              famCount[p.style.fontFamily] += len;
+            }
+            const fontFamily = (
+              Object.entries(famCount).sort((a, b) => b[1] - a[1])[0]?.[0] ??
+              "helvetica"
+            ) as FontFamilyId;
+            built.push({
+              id: nextId++,
+              x,
+              y: acc.top,
+              width: right - x,
+              height: Math.max(acc.bottom - acc.top, acc.fs * 0.8),
+              fontSize: acc.fs,
+              text,
+              fontFamily,
+              bold: total > 0 && boldChars * 2 >= total,
+              italic: total > 0 && italicChars * 2 >= total,
+            });
+          }
+        }
+        if (!cancelled) setLines(built);
       } catch {
-        if (!cancelled) setHasText(false);
+        if (!cancelled) setLines([]);
       } finally {
         try {
-          page?.cleanup?.();
+          page?.cleanup();
         } catch {
           /* ignore */
         }
@@ -931,95 +1085,63 @@ function PdfTextLayer({
     })();
     return () => {
       cancelled = true;
-      try {
-        layer?.cancel?.();
-      } catch {
-        /* ignore */
-      }
     };
-  }, [doc, pageIndex, displayScale]);
+  }, [doc, pageIndex, visible]);
 
   useEffect(() => {
     if (draft) draftRef.current?.focus();
   }, [draft]);
 
-  // Click a native text span → select the whole line it belongs to.
-  const onContainerClick = (e: React.MouseEvent) => {
-    if (!active || draft) return;
-    const el = e.target as HTMLElement;
-    const span = el.closest?.("span") as HTMLElement | null;
-    const container = containerRef.current;
-    if (!span || !container || !container.contains(span)) return;
-    const divs: HTMLElement[] =
-      layerRef.current?.textDivs ??
-      Array.from(container.querySelectorAll("span"));
-    if (divs.length === 0) return;
-    const top = span.offsetTop;
-    const line = divs.filter((d) => Math.abs(d.offsetTop - top) <= 2);
-    if (line.length === 0) return;
-    line.sort((a, b) => a.offsetLeft - b.offsetLeft);
-    const left = Math.min(...line.map((d) => d.offsetLeft));
-    const t = Math.min(...line.map((d) => d.offsetTop));
-    const right = Math.max(...line.map((d) => d.offsetLeft + d.offsetWidth));
-    const bottom = Math.max(
-      ...line.map((d) => d.offsetTop + d.offsetHeight),
-    );
-    const text = line.map((d) => d.textContent ?? "").join("");
-    if (!text.trim()) return;
-    const fs =
-      parseFloat(getComputedStyle(line[0]).fontSize) || 12 * displayScale;
-    setDraft({
-      left,
-      top: t,
-      width: Math.max(right - left, 8),
-      height: Math.max(bottom - t, fs * 1.2),
-      fontSize: fs,
-      original: text,
-      value: text,
-    });
-  };
+  // Switching tools blurs the textarea first, which commits. So when the
+  // tool is off there is nothing to show.
+  if (!active) return null;
 
   const commit = () => {
     if (!draft) return;
-    const { value, original, left, top, width, height, fontSize } = draft;
+    const clean = draft.value.trim();
+    const box = {
+      x: draft.x,
+      y: draft.y,
+      width: draft.width,
+      height: draft.height,
+    };
+    const fontSize = draft.fontSize;
+    const style: PdfTextStyle = {
+      fontFamily: draft.fontFamily,
+      bold: draft.bold,
+      italic: draft.italic,
+    };
+    const unchanged = clean === draft.original.trim();
     setDraft(null);
-    const clean = value.trim();
-    if (!clean || clean === original.trim()) return;
-    onReplace(
-      pageIndex,
-      {
-        x: left / displayScale,
-        y: top / displayScale,
-        width: width / displayScale,
-        height: height / displayScale,
-      },
-      clean,
-      fontSize / displayScale,
-    );
+    if (!clean || unchanged) return;
+    onReplace(pageIndex, box, clean, fontSize, style);
   };
 
   return (
-    <div
-      className="absolute left-0 top-0"
-      style={{
-        width: cssW,
-        height: cssH,
-        pointerEvents: active ? "auto" : "none",
-      }}
-    >
-      <div
-        ref={containerRef}
-        className={`pdf-text-layer${active ? " active" : ""}`}
-        style={{ width: cssW, height: cssH }}
-        onClick={onContainerClick}
-      />
-      {active && hasText === false && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
-          <p className="rounded-lg bg-slate-900/80 px-3 py-1.5 text-center text-xs text-white">
-            No selectable text on this page — scanned PDF?
-          </p>
-        </div>
-      )}
+    <div className="absolute left-0 top-0" style={{ width: cssW, height: cssH }}>
+      {lines !== null &&
+        (lines.length === 0 ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
+            <p className="rounded-lg bg-slate-900/80 px-3 py-1.5 text-center text-xs text-white">
+              No selectable text on this page — scanned PDF?
+            </p>
+          </div>
+        ) : (
+          lines.map((l) => (
+            <div
+              key={l.id}
+              onClick={() => setDraft({ ...l, original: l.text, value: l.text })}
+              className="absolute rounded-[2px] transition-colors hover:bg-brand-500/25 hover:outline hover:outline-1 hover:outline-brand-500"
+              style={{
+                left: l.x * displayScale,
+                top: l.y * displayScale,
+                width: Math.max(l.width * displayScale, 4),
+                height: l.height * displayScale,
+                cursor: "text",
+              }}
+            />
+          ))
+        ))}
       {draft && (
         <textarea
           ref={draftRef}
@@ -1038,13 +1160,18 @@ function PdfTextLayer({
           rows={1}
           style={{
             position: "absolute",
-            left: draft.left - 2,
-            top: draft.top - 2,
-            width: Math.max(draft.width + 8, 80),
-            height: Math.max(draft.height + 6, draft.fontSize * 1.5),
-            fontSize: draft.fontSize,
+            left: draft.x * displayScale - 2,
+            top: draft.y * displayScale - 2,
+            width: Math.max(draft.width * displayScale + 8, 80),
+            height: Math.max(
+              draft.height * displayScale + 6,
+              draft.fontSize * displayScale * 1.5,
+            ),
+            fontSize: draft.fontSize * displayScale,
             lineHeight: 1.3,
-            fontFamily: "Helvetica, Arial, sans-serif",
+            fontFamily: fontCss(draft.fontFamily),
+            fontWeight: draft.bold ? 700 : 400,
+            fontStyle: draft.italic ? "italic" : "normal",
           }}
           className="z-20 resize-none overflow-hidden bg-white px-0.5 outline-none ring-2 ring-brand-500"
         />

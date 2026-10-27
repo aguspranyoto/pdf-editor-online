@@ -243,6 +243,7 @@ export function EditClient() {
       box: { x: number; y: number; width: number; height: number },
       text: string,
       fontSize: number,
+      style?: { fontFamily: FontFamilyId; bold: boolean; italic: boolean },
     ) => {
       const clean = text.trim();
       if (!clean) return;
@@ -271,9 +272,9 @@ export function EditClient() {
         text: clean,
         color: "#111827",
         fontSize: fs,
-        fontFamily: "helvetica",
-        bold: false,
-        italic: false,
+        fontFamily: style?.fontFamily ?? "helvetica",
+        bold: style?.bold ?? false,
+        italic: style?.italic ?? false,
       };
       applyAnnos([...pre, whiteout, replacement]);
       commitHistory(pre);
