@@ -940,6 +940,7 @@ function PdfTextLayer({
         }[] = [];
         for (const raw of tc.items) {
           if (!("str" in raw) || !raw.str) continue;
+          if (!raw.str.trim()) continue; // gap besar antar kolom datang sebagai item spasi — buang biar gap asli kelihatan dan jadi pemisah cluster
           const tx = multMatrix(vp.transform, raw.transform);
           const angle = Math.atan2(tx[1], tx[0]);
           // Skip vertical / rotated text (rare); we only edit horizontal lines.
