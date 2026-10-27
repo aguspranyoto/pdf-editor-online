@@ -8,7 +8,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "PDF Pilot — Free online PDF editor & tools",
+  title: "PDFnesia — Free online PDF editor & tools",
   description:
     "Edit, merge, split and organize PDF files right in your browser. Fast, private and free — your files never leave your device.",
 };

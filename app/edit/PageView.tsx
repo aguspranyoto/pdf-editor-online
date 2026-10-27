@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import { loadPdfjs } from "@/lib/pdfjs";
 import type {
   Annotation,
   DrawAnnotation,
@@ -50,6 +51,12 @@ interface PageViewProps {
   onStartEdit: (id: string) => void;
   onEndEdit: (id: string, text: string, heightPt: number) => void;
   onCreate: (a: Annotation) => void;
+  onReplacePdfText: (
+    pageIndex: number,
+    box: { x: number; y: number; width: number; height: number },
+    text: string,
+    fontSize: number,
+  ) => void;
   onUpdateLive: (a: Annotation) => void;
   onBeginInteraction: () => Annotation[] | null;
   onEndInteraction: (pre: Annotation[] | null) => void;
@@ -135,6 +142,16 @@ export function PageView(props: PageViewProps) {
         </div>
       )}
       <AnnotationLayer {...props} cssW={cssW} cssH={cssH} overlayRef={overlayRef} />
+      <PdfTextLayer
+        key={`pdftext-${info.index}-${displayScale}`}
+        doc={doc}
+        pageIndex={info.index}
+        displayScale={displayScale}
+        cssW={cssW}
+        cssH={cssH}
+        active={props.tool === "editText"}
+        onReplace={props.onReplacePdfText}
+      />
     </div>
   );
 }
@@ -198,6 +215,7 @@ function AnnotationLayer(props: LayerProps) {
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (editingId) return; // let text editing behave normally
+    if (tool === "editText") return; // clicks go to the native PDF text layer
     const pt = toPt(e);
     const pre = props.onBeginInteraction();
 
@@ -375,7 +393,12 @@ function AnnotationLayer(props: LayerProps) {
     <div
       ref={overlayRef}
       className="absolute left-0 top-0 touch-none"
-      style={{ width: cssW, height: cssH, cursor }}
+      style={{
+        width: cssW,
+        height: cssH,
+        cursor,
+        pointerEvents: tool === "editText" ? "none" : "auto",
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -814,6 +837,218 @@ function TextItem({
     >
       {a.text || " "}
       {selected && <SelectionFrame onHandleDown={onHandleDown} />}
+    </div>
+  );
+}
+
+/* ================= Native PDF text layer (edit existing text) ================= */
+
+interface PdfTextBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function PdfTextLayer({
+  doc,
+  pageIndex,
+  displayScale,
+  cssW,
+  cssH,
+  active,
+  onReplace,
+}: {
+  doc: PDFDocumentProxy;
+  pageIndex: number;
+  displayScale: number;
+  cssW: number;
+  cssH: number;
+  active: boolean;
+  onReplace: (
+    pageIndex: number,
+    box: { x: number; y: number; width: number; height: number },
+    text: string,
+    fontSize: number,
+  ) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const layerRef = useRef<{ textDivs?: HTMLElement[] } | null>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+  const [hasText, setHasText] = useState<boolean | null>(null);
+  const [draft, setDraft] = useState<
+    (PdfTextBox & { fontSize: number; original: string; value: string }) | null
+  >(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let layer: { cancel?: () => void; render: () => Promise<unknown> } | null =
+      null;
+    // NOTE: hasText/draft reset on zoom via key-remount from the parent,
+    // so no synchronous setState here (react-hooks/set-state-in-effect).
+    (async () => {
+      let page: {
+        getViewport: (o: { scale: number }) => { width: number; height: number };
+        getTextContent: () => Promise<unknown>;
+        cleanup?: () => void;
+      } | null = null;
+      try {
+        const pdfjs = await loadPdfjs();
+        page = await doc.getPage(pageIndex + 1);
+        if (cancelled) return;
+        const viewport = page.getViewport({ scale: displayScale });
+        const textContent = await page.getTextContent();
+        if (cancelled) return;
+        const container = containerRef.current;
+        if (!container) return;
+        container.innerHTML = "";
+        const Ctor = (pdfjs as unknown as { TextLayer?: new (o: object) => { cancel?: () => void; render: () => Promise<unknown> } }).TextLayer;
+        if (!Ctor) {
+          setHasText(false);
+          return;
+        }
+        layer = new Ctor({
+          textContentSource: textContent,
+          container,
+          viewport,
+        });
+        layerRef.current = layer as unknown as { textDivs?: HTMLElement[] };
+        await layer.render();
+        if (cancelled) return;
+        const divs: HTMLElement[] =
+          (layerRef.current?.textDivs as HTMLElement[] | undefined) ??
+          Array.from(container.querySelectorAll("span"));
+        setHasText(divs.some((d) => (d.textContent ?? "").trim().length > 0));
+      } catch {
+        if (!cancelled) setHasText(false);
+      } finally {
+        try {
+          page?.cleanup?.();
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      try {
+        layer?.cancel?.();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [doc, pageIndex, displayScale]);
+
+  useEffect(() => {
+    if (draft) draftRef.current?.focus();
+  }, [draft]);
+
+  // Click a native text span → select the whole line it belongs to.
+  const onContainerClick = (e: React.MouseEvent) => {
+    if (!active || draft) return;
+    const el = e.target as HTMLElement;
+    const span = el.closest?.("span") as HTMLElement | null;
+    const container = containerRef.current;
+    if (!span || !container || !container.contains(span)) return;
+    const divs: HTMLElement[] =
+      layerRef.current?.textDivs ??
+      Array.from(container.querySelectorAll("span"));
+    if (divs.length === 0) return;
+    const top = span.offsetTop;
+    const line = divs.filter((d) => Math.abs(d.offsetTop - top) <= 2);
+    if (line.length === 0) return;
+    line.sort((a, b) => a.offsetLeft - b.offsetLeft);
+    const left = Math.min(...line.map((d) => d.offsetLeft));
+    const t = Math.min(...line.map((d) => d.offsetTop));
+    const right = Math.max(...line.map((d) => d.offsetLeft + d.offsetWidth));
+    const bottom = Math.max(
+      ...line.map((d) => d.offsetTop + d.offsetHeight),
+    );
+    const text = line.map((d) => d.textContent ?? "").join("");
+    if (!text.trim()) return;
+    const fs =
+      parseFloat(getComputedStyle(line[0]).fontSize) || 12 * displayScale;
+    setDraft({
+      left,
+      top: t,
+      width: Math.max(right - left, 8),
+      height: Math.max(bottom - t, fs * 1.2),
+      fontSize: fs,
+      original: text,
+      value: text,
+    });
+  };
+
+  const commit = () => {
+    if (!draft) return;
+    const { value, original, left, top, width, height, fontSize } = draft;
+    setDraft(null);
+    const clean = value.trim();
+    if (!clean || clean === original.trim()) return;
+    onReplace(
+      pageIndex,
+      {
+        x: left / displayScale,
+        y: top / displayScale,
+        width: width / displayScale,
+        height: height / displayScale,
+      },
+      clean,
+      fontSize / displayScale,
+    );
+  };
+
+  return (
+    <div
+      className="absolute left-0 top-0"
+      style={{
+        width: cssW,
+        height: cssH,
+        pointerEvents: active ? "auto" : "none",
+      }}
+    >
+      <div
+        ref={containerRef}
+        className={`pdf-text-layer${active ? " active" : ""}`}
+        style={{ width: cssW, height: cssH }}
+        onClick={onContainerClick}
+      />
+      {active && hasText === false && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
+          <p className="rounded-lg bg-slate-900/80 px-3 py-1.5 text-center text-xs text-white">
+            No selectable text on this page — scanned PDF?
+          </p>
+        </div>
+      )}
+      {draft && (
+        <textarea
+          ref={draftRef}
+          value={draft.value}
+          onChange={(e) => setDraft({ ...draft, value: e.target.value })}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Escape") setDraft(null);
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              commit();
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          rows={1}
+          style={{
+            position: "absolute",
+            left: draft.left - 2,
+            top: draft.top - 2,
+            width: Math.max(draft.width + 8, 80),
+            height: Math.max(draft.height + 6, draft.fontSize * 1.5),
+            fontSize: draft.fontSize,
+            lineHeight: 1.3,
+            fontFamily: "Helvetica, Arial, sans-serif",
+          }}
+          className="z-20 resize-none overflow-hidden bg-white px-0.5 outline-none ring-2 ring-brand-500"
+        />
+      )}
     </div>
   );
 }

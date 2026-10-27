@@ -21,6 +21,7 @@ import {
   Pencil,
   Redo2,
   Square,
+  TextCursorInput,
   Type,
   Undo2,
   ZoomIn,
@@ -233,6 +234,52 @@ export function EditClient() {
       updateAnnotation({ ...a, ...patch } as Annotation, null);
     },
     [selectedId, updateAnnotation],
+  );
+
+  /* Replace native PDF text: cover the original with white, draw new text. */
+  const replacePdfText = useCallback(
+    (
+      pageIndex: number,
+      box: { x: number; y: number; width: number; height: number },
+      text: string,
+      fontSize: number,
+    ) => {
+      const clean = text.trim();
+      if (!clean) return;
+      const pre = annosRef.current;
+      const pad = 2;
+      const fs = Math.min(96, Math.max(6, Math.round(fontSize * 10) / 10));
+      const whiteout: Annotation = {
+        id: uid(),
+        pageIndex,
+        type: "whiteout",
+        x: box.x - pad,
+        y: box.y - pad,
+        width: box.width + pad * 2,
+        height: box.height + pad * 2,
+        color: "#ffffff",
+        strokeWidth: 1,
+      };
+      const replacement: Annotation = {
+        id: uid(),
+        pageIndex,
+        type: "text",
+        x: box.x,
+        y: box.y,
+        width: Math.max(box.width, 40),
+        height: Math.max(box.height, fs * 1.35),
+        text: clean,
+        color: "#111827",
+        fontSize: fs,
+        fontFamily: "helvetica",
+        bold: false,
+        italic: false,
+      };
+      applyAnnos([...pre, whiteout, replacement]);
+      commitHistory(pre);
+      setSelectedId(replacement.id);
+    },
+    [applyAnnos, commitHistory],
   );
 
   /* ---------- keyboard ---------- */
@@ -608,6 +655,11 @@ export function EditClient() {
           </FormatGroup>
         )}
 
+        {tool === "editText" && (
+          <p className="text-xs text-slate-400">
+            Click any text in the PDF to edit it. Original is covered automatically.
+          </p>
+        )}
         {tool === "highlight" && !selectedAnno && (
           <p className="text-xs text-slate-400">
             Drag across text to highlight it.
@@ -642,6 +694,9 @@ export function EditClient() {
           </RailBtn>
           <RailBtn active={tool === "text"} onClick={() => setTool("text")} label="Add text">
             <Type className="h-5 w-5" />
+          </RailBtn>
+          <RailBtn active={tool === "editText"} onClick={() => setTool("editText")} label="Edit PDF text">
+            <TextCursorInput className="h-5 w-5" />
           </RailBtn>
           <RailBtn active={tool === "draw"} onClick={() => setTool("draw")} label="Draw">
             <Pencil className="h-5 w-5" />
@@ -730,6 +785,7 @@ export function EditClient() {
                   );
                 }}
                 onCreate={(a) => addAnnotation(a)}
+              onReplacePdfText={replacePdfText}
                 onUpdateLive={(a) => updateAnnotation(a, null)}
                 onBeginInteraction={() => annosRef.current}
                 onEndInteraction={(pre) => commitHistory(pre)}

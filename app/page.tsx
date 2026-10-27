@@ -11,6 +11,13 @@ import {
 import { Logo } from "@/components/Logo";
 import { HeroDropzone } from "@/components/HeroDropzone";
 
+const navTools = [
+  { name: "Edit PDF", href: "/" },
+  { name: "Merge PDF", href: "/merge" },
+  { name: "Split PDF", href: "/split" },
+  { name: "Organize PDF", href: "/organize" },
+];
+
 const tools = [
   {
     href: "/edit",
@@ -67,8 +74,8 @@ export default function Home() {
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
           <Logo />
           <nav className="hidden items-center gap-6 text-sm font-medium text-slate-600 md:flex">
-            {tools.slice(0, 3).map((t) => (
-              <Link key={t.href} href={t.href} className="hover:text-brand-600">
+            {navTools.map((t) => (
+              <Link key={t.href + t.name} href={t.href} className="hover:text-brand-600">
                 {t.name}
               </Link>
             ))}
@@ -157,7 +164,7 @@ export default function Home() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-sm text-slate-500 sm:flex-row">
           <Logo />
-          <p>© {new Date().getFullYear()} PDF Pilot. Files stay on your device.</p>
+          <p>© {new Date().getFullYear()} PDFnesia. Files stay on your device.</p>
         </div>
       </footer>
     </div>

@@ -1,6 +1,7 @@
 export type ToolId =
   | "select"
   | "text"
+  | "editText"
   | "draw"
   | "highlight"
   | "whiteout"
