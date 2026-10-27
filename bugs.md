@@ -1,0 +1,24 @@
+# Potential Bugs — pdf-editor-online
+
+> Generated from code inspection 2026-10-27. Status updated after fixes.
+
+| ID | Severity | File | Description | Status |
+|----|----------|------|-------------|--------|
+| BUG-01 | High | `app/edit/EditClient.tsx:185-224` | `addAnnotation` / `deleteSelected` / `duplicateSelected` call `commitHistory(annosRef.current)` **before** `applyAnnos()`. At that moment `pre === annosRef.current`, so `JSON.stringify(pre) === JSON.stringify(current)` is true and history push is skipped. Result: add/delete/duplicate are **not undoable**. | DONE |
+| BUG-02 | High | `app/edit/EditClient.tsx:160-165` | `commitHistory` uses `JSON.stringify(pre) === JSON.stringify(current)` to detect no-ops. With image annotations (`dataUrl` base64, MBs) every move/resize/end-interaction stringifies megabytes. Perf bomb + blocks main thread. The caller already passes `null` when `!moved`, so deep compare is redundant. | DONE |
+| BUG-03 | Medium | `app/edit/EditClient.tsx:311-344` | `insertImage` uses `hoverPageRef.current` (last `onPointerEnter`). If user scrolls via page-nav buttons or keyboard without hovering, image lands on stale page, not `currentPage`. Deps `[pages, addAnnotation]` also miss `currentPage`. | DONE |
+| BUG-04 | Medium | `app/edit/PageView.tsx:341-352`, `app/edit/EditClient.tsx:391-399,564-581` | Highlight/whiteout creation hardcodes `#fde047` / `#ffffff`, ignoring color swatches, yet swatches are shown for those tools (`needsColor` includes them). Conversely in `select` mode with a shape selected, swatches are hidden, so an existing shape cannot be recolored. Misleading UI + dead path. | DONE |
+| BUG-05 | Medium | `app/edit/PageView.tsx:295-302` | Move/resize sets `moved=true` on any sub-pixel `pointermove`. Click-select with 1px jitter pushes a history entry, polluting undo stack. No threshold. | DONE |
+| BUG-06 | Medium | `lib/fileStore.ts:10-25` | `setPendingFiles([a,b])` sets both `pendingFile=a` and `pendingFiles=[a,b]`. `takePendingFiles()` clears only `pendingFiles`, leaving stale `pendingFile`; `takePendingFile()` clears only `pendingFile`, leaving stale `pendingFiles`. Merge page (`takePendingFiles`) can therefore never receive a single-file handoff, and stale files leak across tools. | DONE |
+| BUG-07 | Low | `app/edit/PageView.tsx:81-109` | `doc.getPage()` proxy is never released (`page.cleanup()` missing). Rapid scroll / zoom over large docs accumulates rendered resources. `lib/pdfjs.ts:renderPageToCanvas` is also dead code (duplicated render logic in PageView). | DONE |
+| BUG-08 | Low | `app/organize/page.tsx:196-210` | Rotated (90°/270°) thumbnails use CSS `transform: rotate()` inside fixed `h-40` box with `aspectRatio: "auto"` no-op. Portrait pages overflow/clip. Should swap container constraints or use `rotate` on wrapper with reserved space. | DONE |
+| BUG-09 | High | `app/edit/PageView.tsx:527-566` | Freehand `draw` annotation rendered with zero-size `<svg width=0 height=0>` at page origin + absolute points + `overflow-visible`. Preview (full-page svg) visible during drag, final annotation invisible in Chrome → garis langsung hilang setelah dilepas. Fix: svg `inset-0 h-full w-full` sized to `annoBounds`, points relative `(p-b)*s`. | DONE |
+| BUG-10 | High | `app/edit/EditClient.tsx:571-588` | Color chooser saat DRAW ga working, selalu merah. Penyebab: `addAnnotation` set `selectedId`, lalu `Swatches onChange` cek `selectedAnno` dulu tanpa cek `tool`. Saat tool=draw + ada selected lama, klik warna malah `patchStyleToSelected` (recolor lama) bukan `setColor` (brush baru). Fix: jika `tool!=="select"` selalu update tool defaults (`color`/`textStyle`), hanya patch selected saat `tool==="select"`. Berlaku juga untuk font/bold/italic text. | DONE |
+| BUG-11 | Medium | `app/merge/page.tsx` | Setelah klik Merge langsung tampil "Your document is ready" tanpa preview. User minta preview dulu + bisa edit (draw/text/image) seperti di /edit. Fix: simpan `bytes` hasil merge, generate thumbnails via `pageThumbnail` (max 12), tampilkan grid preview + tombol "Preview & Edit" (`setPendingFiles` + `router.push("/edit")`) + "Download directly". | DONE |
+| BUG-12 | Medium | `app/organize/page.tsx` | Setelah klik Apply langsung download tanpa preview. User minta 'Apply & Preview' lalu bisa edit/download. Fix: sama seperti merge — simpan `bytes`, generate thumbs (max 12), tampilkan preview + tombol "Preview & Edit" ke /edit + "Download directly" + "Back to organize" (keep order state) + "Start over". Button diubah jadi "Apply & Preview". | DONE |
+
+## Notes / non-fixes
+
+* `setToolAfterShape()` in `PageView.tsx:366-368` is a no-op — intentional, left as-is.
+* `parseRanges` in `split/page.tsx` silently drops invalid segments — acceptable, error shown when result empty.
+* Rotated source PDFs (`/Rotate`) overlay vs `pdf-lib.getSize()` coordinate mismatch — out of scope, needs full rotation-aware transform.

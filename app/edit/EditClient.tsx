@@ -158,8 +158,7 @@ export function EditClient() {
   }, []);
 
   const commitHistory = useCallback((pre: Annotation[] | null) => {
-    if (!pre) return;
-    if (JSON.stringify(pre) === JSON.stringify(annosRef.current)) return;
+    if (!pre || pre === annosRef.current) return;
     setPast((p) => [...p.slice(-49), pre]);
     setFuture([]);
   }, []);
@@ -184,8 +183,9 @@ export function EditClient() {
 
   const addAnnotation = useCallback(
     (a: Annotation) => {
-      commitHistory(annosRef.current);
-      applyAnnos([...annosRef.current, a]);
+      const pre = annosRef.current;
+      applyAnnos([...pre, a]);
+      commitHistory(pre);
       setSelectedId(a.id);
     },
     [applyAnnos, commitHistory],
@@ -201,8 +201,9 @@ export function EditClient() {
 
   const deleteSelected = useCallback(() => {
     if (!selectedId) return;
-    commitHistory(annosRef.current);
-    applyAnnos(annosRef.current.filter((a) => a.id !== selectedId));
+    const pre = annosRef.current;
+    applyAnnos(pre.filter((a) => a.id !== selectedId));
+    commitHistory(pre);
     setSelectedId(null);
     setEditingId(null);
   }, [selectedId, applyAnnos, commitHistory]);
@@ -218,8 +219,9 @@ export function EditClient() {
     } else {
       copy.points = copy.points.map((p) => ({ x: p.x + 16, y: p.y + 16 }));
     }
-    commitHistory(annosRef.current);
-    applyAnnos([...annosRef.current, copy]);
+    const pre = annosRef.current;
+    applyAnnos([...pre, copy]);
+    commitHistory(pre);
     setSelectedId(copy.id);
   }, [selectedId, applyAnnos, commitHistory]);
 
@@ -290,6 +292,7 @@ export function EditClient() {
         }
       });
       setCurrentPage(best);
+      hoverPageRef.current = best;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
@@ -322,7 +325,15 @@ export function EditClient() {
         img.onerror = () => resolve({ w: 4, h: 3 });
         img.src = dataUrl;
       });
-      const pageInfo = pages[Math.min(hoverPageRef.current, pages.length - 1)];
+      const targetIdx = Math.min(
+        Math.max(hoverPageRef.current, 0),
+        pages.length - 1,
+      );
+      // Prefer the page in view (currentPage) when hover is stale;
+      // hover updates on pointer-enter, currentPage tracks scroll center.
+      const inViewIdx = Math.min(Math.max(currentPage, 0), pages.length - 1);
+      const pageInfo =
+        pages[targetIdx] ?? pages[inViewIdx] ?? pages[0];
       if (!pageInfo) return;
       const maxW = Math.min(pageInfo.width * 0.45, 320);
       const w = maxW;
@@ -340,7 +351,7 @@ export function EditClient() {
       });
       setTool("select");
     },
-    [pages, addAnnotation],
+    [pages, addAnnotation, currentPage],
   );
 
   /* ---------- export ---------- */
@@ -388,16 +399,13 @@ export function EditClient() {
     [annos, selectedId],
   );
 
-  const needsColor = [
-    "draw",
-    "highlight",
-    "whiteout",
-    "rect",
-    "ellipse",
-    "line",
-  ].includes(tool);
+  const needsColor = ["draw", "rect", "ellipse", "line"].includes(tool);
   const showStroke = ["draw", "rect", "ellipse", "line"].includes(tool);
   const showTextStyle = tool === "text";
+  const isSelectMode = tool === "select";
+  const selectedHasColor =
+    !!selectedAnno && "color" in selectedAnno;
+  const showSwatches = needsColor || showTextStyle || selectedHasColor;
 
   /* ---------- idle / loading screens ---------- */
 
@@ -515,9 +523,9 @@ export function EditClient() {
         {(showTextStyle || selectedAnno?.type === "text") && (
           <FormatGroup>
             <Select
-              value={selectedAnno?.type === "text" ? selectedAnno.fontFamily : textStyle.fontFamily}
+              value={isSelectMode && selectedAnno?.type === "text" ? selectedAnno.fontFamily : textStyle.fontFamily}
               onChange={(v) => {
-                if (selectedAnno?.type === "text")
+                if (isSelectMode && selectedAnno?.type === "text")
                   patchStyleToSelected({ fontFamily: v as FontFamilyId });
                 else setTextStyle((s) => ({ ...s, fontFamily: v as FontFamilyId }));
               }}
@@ -528,18 +536,18 @@ export function EditClient() {
               ]}
             />
             <NumberInput
-              value={selectedAnno?.type === "text" ? selectedAnno.fontSize : textStyle.fontSize}
+              value={isSelectMode && selectedAnno?.type === "text" ? selectedAnno.fontSize : textStyle.fontSize}
               min={6}
               max={96}
               onChange={(v) => {
-                if (selectedAnno?.type === "text") patchStyleToSelected({ fontSize: v });
+                if (isSelectMode && selectedAnno?.type === "text") patchStyleToSelected({ fontSize: v });
                 else setTextStyle((s) => ({ ...s, fontSize: v }));
               }}
             />
             <ToggleBtn
-              active={selectedAnno?.type === "text" ? selectedAnno.bold : textStyle.bold}
+              active={isSelectMode && selectedAnno?.type === "text" ? selectedAnno.bold : textStyle.bold}
               onClick={() => {
-                if (selectedAnno?.type === "text")
+                if (isSelectMode && selectedAnno?.type === "text")
                   patchStyleToSelected({ bold: !selectedAnno.bold });
                 else setTextStyle((s) => ({ ...s, bold: !s.bold }));
               }}
@@ -548,9 +556,9 @@ export function EditClient() {
               <Bold className="h-3.5 w-3.5" />
             </ToggleBtn>
             <ToggleBtn
-              active={selectedAnno?.type === "text" ? selectedAnno.italic : textStyle.italic}
+              active={isSelectMode && selectedAnno?.type === "text" ? selectedAnno.italic : textStyle.italic}
               onClick={() => {
-                if (selectedAnno?.type === "text")
+                if (isSelectMode && selectedAnno?.type === "text")
                   patchStyleToSelected({ italic: !selectedAnno.italic });
                 else setTextStyle((s) => ({ ...s, italic: !s.italic }));
               }}
@@ -561,18 +569,23 @@ export function EditClient() {
           </FormatGroup>
         )}
 
-        {(needsColor || showTextStyle) && (
+        {(showSwatches) && (
           <Swatches
             colors={COLORS}
             value={
-              selectedAnno && "color" in selectedAnno
-                ? selectedAnno.color
-                : showTextStyle
+              !isSelectMode
+                ? showTextStyle
                   ? textStyle.color
+                  : color
+                : selectedAnno && "color" in selectedAnno
+                  ? selectedAnno.color
                   : color
             }
             onChange={(c) => {
-              if (selectedAnno && "color" in selectedAnno) {
+              if (!isSelectMode) {
+                if (showTextStyle) setTextStyle((s) => ({ ...s, color: c }));
+                else setColor(c);
+              } else if (selectedAnno && "color" in selectedAnno) {
                 patchStyleToSelected({ color: c });
               } else if (showTextStyle) setTextStyle((s) => ({ ...s, color: c }));
               else setColor(c);

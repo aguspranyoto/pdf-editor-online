@@ -82,9 +82,11 @@ export function PageView(props: PageViewProps) {
     if (!visible) return;
     let cancelled = false;
     let task: RenderTask | null = null;
+    let proxy: { cleanup: () => void } | null = null;
     (async () => {
       try {
         const page = await doc.getPage(info.index + 1);
+        proxy = page;
         if (cancelled) return;
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const viewport = page.getViewport({ scale: displayScale * dpr });
@@ -100,6 +102,8 @@ export function PageView(props: PageViewProps) {
         if (!cancelled) setRendered(true);
       } catch {
         /* render cancelled */
+      } finally {
+        proxy?.cleanup();
       }
     })();
     return () => {
@@ -293,7 +297,7 @@ function AnnotationLayer(props: LayerProps) {
       return;
     }
     if ((d.mode === "move" || d.mode === "resize") && d.orig) {
-      d.moved = true;
+      if (Math.hypot(dx, dy) > 2) d.moved = true;
       if (d.mode === "move") {
         props.onUpdateLive(moveAnnotation(d.orig, dx, dy));
       } else if (d.id && d.handle) {
@@ -522,14 +526,16 @@ function AnnotationItem({
 
   if (a.type === "draw") {
     const b = annoBounds(a);
+    const w = Math.max(b.width * s, 2);
+    const h = Math.max(b.height * s, 2);
     return (
       <div
         className="absolute"
         style={{
           left: b.x * s,
           top: b.y * s,
-          width: b.width * s,
-          height: b.height * s,
+          width: w,
+          height: h,
         }}
         onPointerDown={(e) => {
           if (!canInteract || editing) return;
@@ -538,13 +544,8 @@ function AnnotationItem({
         }}
       >
         <svg
-          className="absolute overflow-visible"
-          style={{
-            left: -b.x * s,
-            top: -b.y * s,
-            width: 0,
-            height: 0,
-          }}
+          className="absolute inset-0 h-full w-full overflow-visible"
+          viewBox={`0 0 ${w} ${h}`}
         >
           <polyline
             fill="none"
@@ -552,7 +553,7 @@ function AnnotationItem({
             strokeWidth={a.strokeWidth * s}
             strokeLinecap="round"
             strokeLinejoin="round"
-            points={a.points.map((p) => `${p.x * s},${p.y * s}`).join(" ")}
+            points={a.points.map((p) => `${(p.x - b.x) * s},${(p.y - b.y) * s}`).join(" ")}
           />
         </svg>
         {selected && (

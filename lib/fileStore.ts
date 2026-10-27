@@ -15,11 +15,13 @@ export function setPendingFiles(files: File[]) {
 export function takePendingFile(): File | null {
   const f = pendingFile;
   pendingFile = null;
+  pendingFiles = null;
   return f;
 }
 
 export function takePendingFiles(): File[] | null {
   const f = pendingFiles;
   pendingFiles = null;
+  pendingFile = null;
   return f;
 }
